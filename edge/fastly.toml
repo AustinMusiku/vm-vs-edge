@@ -1,0 +1,15 @@
+# This file describes a Fastly Compute package. To learn more visit:
+# https://www.fastly.com/documentation/reference/compute/fastly-toml
+
+authors = ["musiku47@gmail.com"]
+cloned_from = "https://github.com/fastly/compute-starter-kit-go-default"
+description = "Simple go api"
+language = "go"
+manifest_version = 3
+name = "edge"
+service_id = "xN78ayj1BAEhD3xEPJqkh6"
+
+[scripts]
+  build = "go build -o bin/main.wasm ."
+  env_vars = ["GOARCH=wasm", "GOOS=wasip1"]
+  post_init = "go get github.com/fastly/compute-sdk-go@latest"
