@@ -55,16 +55,13 @@ func newPressureGauge(limit int) *pressureGauge {
 	}
 }
 
-type sender func(int, string, string, benchmark)
+type sender func(int, string, string, benchmark, *pressureGauge)
 
-func (pg *pressureGauge) execute(fn sender, i int, u string, s string, b benchmark) error {
+func (pg *pressureGauge) execute(fn sender, i int, u string, s string, b benchmark) {
 	select {
 	case <-pg.tokens:
 		pg.wg.Add(1)
-		go fn(i, u, s, b)
-		return nil
-	default:
-		return errors.New("maximum requests in flight")
+		go fn(i, u, s, b, pg)
 	}
 }
 
@@ -177,11 +174,8 @@ func run(config *config, pg *pressureGauge, benchmark benchmark) error {
 		}
 
 		for i := 0; i < int(config.num); i++ {
-			select {
-			case <-pg.tokens:
-				pg.wg.Add(1)
-				go send(i, url, server, benchmark, pg)
-			}
+			i := i
+			pg.execute(send, i, url, server, benchmark)
 		}
 
 		pg.wg.Wait()
