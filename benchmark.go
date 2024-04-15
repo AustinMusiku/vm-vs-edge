@@ -8,6 +8,8 @@ import (
 	"net/http"
 	urlpkg "net/url"
 	"os"
+	"runtime"
+	"sync"
 	"time"
 )
 
@@ -35,9 +37,35 @@ type results struct {
 	avg   time.Duration
 }
 
-type benchmark struct {
-	edge *results
-	vps  *results
+type benchmark map[string]*results
+
+type pressureGauge struct {
+	wg     sync.WaitGroup
+	tokens chan struct{}
+}
+
+func newPressureGauge(limit int) *pressureGauge {
+	ch := make(chan struct{}, limit)
+	for range limit {
+		ch <- struct{}{}
+	}
+
+	return &pressureGauge{
+		tokens: ch,
+	}
+}
+
+type sender func(int, string, string, benchmark)
+
+func (pg *pressureGauge) execute(fn sender, i int, u string, s string, b benchmark) error {
+	select {
+	case <-pg.tokens:
+		pg.wg.Add(1)
+		go fn(i, u, s, b)
+		return nil
+	default:
+		return errors.New("maximum requests in flight")
+	}
 }
 
 var usageStr = `Compare the performance of a service deployed on a VPS vs on a serverless environment.
@@ -106,61 +134,70 @@ func validateConfig(config *config) error {
 	return nil
 }
 
-func run(config *config) error {
-	edgeResults := &results{
-		name:  "edge",
-		times: make([]time.Duration, config.num),
+func send(i int, url string, server string, benchmark benchmark, pg *pressureGauge) {
+	client := http.Client{
+		Timeout: 3 * time.Second,
 	}
 
-	vpsResults := &results{
-		name:  "vps",
-		times: make([]time.Duration, config.num),
+	start := time.Now()
+	resp, err := client.Get(url)
+	elapsed := time.Since(start)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+
+	benchmark[server].times[i] = elapsed
+	benchmark[server].sum += int64(elapsed)
+
+	if elapsed > benchmark[server].max {
+		benchmark[server].max = elapsed
 	}
 
-	benchmark := benchmark{
-		edge: edgeResults,
-		vps:  vpsResults,
+	if benchmark[server].min == 0 || elapsed < benchmark[server].min {
+		benchmark[server].min = elapsed
 	}
+
+	pg.tokens <- struct{}{}
+	pg.wg.Done()
+}
+
+func run(config *config, pg *pressureGauge, benchmark benchmark) error {
+	var server string
 
 	fmt.Printf("\nRunning benchmark...\n")
-	for _, url := range []string{config.edgeUrl, config.vpsUrl} {
+	benchmarkStartTime := time.Now()
+	for i, url := range []string{config.edgeUrl, config.vpsUrl} {
 		fmt.Printf("Making %d requests to %s...\n", config.num, url)
-
-		client := http.Client{
-			Timeout: 3 * time.Second,
+		switch i {
+		case 0:
+			server = "edge"
+		case 1:
+			server = "vps"
 		}
 
 		for i := 0; i < int(config.num); i++ {
-			start := time.Now()
-			resp, err := client.Get(url)
-			stop := time.Since(start)
-			if err != nil {
-				return err
-			}
-
-			resp.Body.Close()
-
-			if url == config.edgeUrl {
-				edgeResults.times[i] = stop
-				edgeResults.sum += int64(stop)
-			} else {
-				vpsResults.times[i] = stop
-				vpsResults.sum += int64(stop)
+			select {
+			case <-pg.tokens:
+				pg.wg.Add(1)
+				go send(i, url, server, benchmark, pg)
 			}
 		}
 
-		if url == config.edgeUrl {
-			edgeResults.avg = time.Duration(int64(edgeResults.sum) / config.num)
-		} else {
-			vpsResults.avg = time.Duration(int64(vpsResults.sum) / config.num)
-
-		}
+		pg.wg.Wait()
+		benchmark[server].avg = time.Duration(int64(benchmark[server].sum) / config.num)
 	}
 
-	fmt.Printf("  Done.\n\n")
+	fmt.Printf("\nBenchmark for %d reqs completed in %s\n", config.num, time.Since(benchmarkStartTime))
+	fmt.Printf("Done.\n\n")
 
-	fmt.Printf("Edge avg: %s\n", benchmark.edge.avg)
-	fmt.Printf(" VPS avg: %s\n", benchmark.vps.avg)
+	fmt.Println("Results:")
+	fmt.Printf("        avg          min          max\n")
+	fmt.Printf("  Edge: %.3fms    %.3fms    %.3fms\n",
+		benchmark["edge"].avg.Seconds()*1000, benchmark["edge"].min.Seconds()*1000, benchmark["edge"].max.Seconds()*1000)
+
+	fmt.Printf("   VPS: %.3fms    %.3fms    %.3fms\n\n",
+		benchmark["vps"].avg.Seconds()*1000, benchmark["vps"].min.Seconds()*1000, benchmark["vps"].max.Seconds()*1000)
 
 	return nil
 }
@@ -180,12 +217,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("\nConfiguration:")
-	fmt.Printf("  Edge URL: %s\n", cfg.edgeUrl)
-	fmt.Printf("   VPS URL: %s\n", cfg.vpsUrl)
-	fmt.Printf("  Requests: %d\n", cfg.num)
+	benchmark := benchmark{
+		"edge": &results{
+			name:  "edge",
+			times: make([]time.Duration, cfg.num),
+		},
+		"vps": &results{
+			name:  "vps",
+			times: make([]time.Duration, cfg.num),
+		},
+	}
 
-	if err := run(cfg); err != nil {
+	pg := newPressureGauge(runtime.GOMAXPROCS(0))
+
+	if err := run(cfg, pg, benchmark); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
