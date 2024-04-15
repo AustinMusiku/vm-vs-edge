@@ -39,11 +39,16 @@ type results struct {
 
 type benchmark map[string]*results
 
+// Limit the number of requests in flight at any given
+// time to the number of available CPUs.
 type pressureGauge struct {
 	wg     sync.WaitGroup
 	tokens chan struct{}
 }
 
+// Initialize a new pressureGauge with a limit of `limit`.
+// The preferred data type for the tokens is an empty struct as
+// it consumes zero memory.
 func newPressureGauge(limit int) *pressureGauge {
 	ch := make(chan struct{}, limit)
 	for range limit {
@@ -55,8 +60,12 @@ func newPressureGauge(limit int) *pressureGauge {
 	}
 }
 
+// Type alias for the sender function.
 type sender func(int, string, string, benchmark, *pressureGauge)
 
+// Enforce the limit of requests in flight by executing the
+// function `fn` only when there are available tokens in the
+// pressure gauge. Also note that it increments the pressure gauge wait group.
 func (pg *pressureGauge) execute(fn sender, i int, u string, s string, b benchmark) {
 	select {
 	case <-pg.tokens:
@@ -136,6 +145,7 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 		Timeout: 3 * time.Second,
 	}
 
+	// Wrap the request in a timer to measure the time taken to complete.
 	start := time.Now()
 	resp, err := client.Get(url)
 	elapsed := time.Since(start)
@@ -155,6 +165,7 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 		benchmark[server].min = elapsed
 	}
 
+	// Release the token back to the pressure gauge.
 	pg.tokens <- struct{}{}
 	pg.wg.Done()
 }
@@ -174,7 +185,7 @@ func run(config *config, pg *pressureGauge, benchmark benchmark) error {
 		}
 
 		for i := 0; i < int(config.num); i++ {
-			i := i
+			i := i // shadow the loop variable to avoid iterating over the same value.
 			pg.execute(send, i, url, server, benchmark)
 		}
 
