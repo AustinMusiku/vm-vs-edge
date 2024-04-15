@@ -24,17 +24,17 @@ type config struct {
 
 type results struct {
 	name  string
-	times []time.Duration
-	sum   int64
-	p25   time.Duration
-	p50   time.Duration
-	p75   time.Duration
-	p90   time.Duration
-	p95   time.Duration
-	p99   time.Duration
-	max   time.Duration
-	min   time.Duration
-	avg   time.Duration
+	times []float64
+	sum   float64
+	p25   float64
+	p50   float64
+	p75   float64
+	p90   float64
+	p95   float64
+	p99   float64
+	max   float64
+	min   float64
+	avg   float64
 }
 
 type benchmark map[string]*results
@@ -148,14 +148,14 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 	// Wrap the request in a timer to measure the time taken to complete.
 	start := time.Now()
 	resp, err := client.Get(url)
-	elapsed := time.Since(start)
+	elapsed := time.Since(start).Seconds() * 1000
 	if err != nil {
 		return
 	}
 	resp.Body.Close()
 
 	benchmark[server].times[i] = elapsed
-	benchmark[server].sum += int64(elapsed)
+	benchmark[server].sum += elapsed
 
 	if elapsed > benchmark[server].max {
 		benchmark[server].max = elapsed
@@ -190,7 +190,7 @@ func run(config *config, pg *pressureGauge, benchmark benchmark) error {
 		}
 
 		pg.wg.Wait()
-		benchmark[server].avg = time.Duration(int64(benchmark[server].sum) / config.num)
+		benchmark[server].avg = benchmark[server].sum / float64(config.num)
 	}
 
 	fmt.Printf("\nBenchmark for %d reqs completed in %s\n", config.num, time.Since(benchmarkStartTime))
@@ -198,11 +198,8 @@ func run(config *config, pg *pressureGauge, benchmark benchmark) error {
 
 	fmt.Println("Results:")
 	fmt.Printf("        avg          min          max\n")
-	fmt.Printf("  Edge: %.3fms    %.3fms    %.3fms\n",
-		benchmark["edge"].avg.Seconds()*1000, benchmark["edge"].min.Seconds()*1000, benchmark["edge"].max.Seconds()*1000)
-
-	fmt.Printf("   VPS: %.3fms    %.3fms    %.3fms\n\n",
-		benchmark["vps"].avg.Seconds()*1000, benchmark["vps"].min.Seconds()*1000, benchmark["vps"].max.Seconds()*1000)
+	fmt.Printf("  Edge: %.3fms    %.3fms    %.3fms\n", benchmark["edge"].avg, benchmark["edge"].min, benchmark["edge"].max)
+	fmt.Printf("   VPS: %.3fms    %.3fms    %.3fms\n\n", benchmark["vps"].avg, benchmark["vps"].min, benchmark["vps"].max)
 
 	return nil
 }
@@ -225,11 +222,11 @@ func main() {
 	benchmark := benchmark{
 		"edge": &results{
 			name:  "edge",
-			times: make([]time.Duration, cfg.num),
+			times: make([]float64, cfg.num),
 		},
 		"vps": &results{
 			name:  "vps",
-			times: make([]time.Duration, cfg.num),
+			times: make([]float64, cfg.num),
 		},
 	}
 
