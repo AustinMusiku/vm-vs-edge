@@ -230,7 +230,7 @@ func main() {
 		},
 	}
 
-	pg := newPressureGauge(runtime.GOMAXPROCS(0))
+	pg := newPressureGauge(runtime.NumCPU())
 
 	if err := run(cfg, pg, benchmark); err != nil {
 		fmt.Fprintln(os.Stderr, err)
