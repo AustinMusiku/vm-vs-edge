@@ -23,6 +23,7 @@ type config struct {
 }
 
 type results struct {
+	mu    sync.Mutex
 	name  string
 	times []float64
 	sum   float64
@@ -155,6 +156,8 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 	resp.Body.Close()
 
 	benchmark[server].times[i] = elapsed
+
+	benchmark[server].mu.Lock()
 	benchmark[server].sum += elapsed
 
 	if elapsed > benchmark[server].max {
@@ -164,6 +167,7 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 	if benchmark[server].min == 0 || elapsed < benchmark[server].min {
 		benchmark[server].min = elapsed
 	}
+	benchmark[server].mu.Unlock()
 
 	// Release the token back to the pressure gauge.
 	pg.tokens <- struct{}{}
