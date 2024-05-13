@@ -1,5 +1,8 @@
 include .envrc
 
+# set default value for "reqs"
+reqs ?= 100
+
 .PHONY: run compile
 
 compile:
@@ -8,6 +11,6 @@ compile:
 
 run:
 	@echo "Running..."
-	./bin/benchmark ${EDGE_URL} ${VM_URL}
+	./bin/benchmark -n ${reqs} ${EDGE_URL} ${VM_URL}
 
 	
