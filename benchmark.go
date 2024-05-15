@@ -5,10 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	urlpkg "net/url"
 	"os"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +39,47 @@ type results struct {
 	max   float64
 	min   float64
 	avg   float64
+}
+
+func calculateStatistics(results *results) {
+	sortedTimes := make([]float64, len(results.times))
+	copy(sortedTimes, results.times)
+	slices.Sort(sortedTimes)
+
+	p25 := percentile(sortedTimes, 25)
+	p50 := percentile(sortedTimes, 50)
+	p75 := percentile(sortedTimes, 75)
+	p90 := percentile(sortedTimes, 90)
+
+	results.mu.Lock()
+	defer results.mu.Unlock()
+	results.p25, results.p50, results.p75, results.p90 = p25, p50, p75, p90
+}
+
+func percentile(sortedTimes []float64, p int) float64 {
+	if len(sortedTimes) == 0 {
+		return 0
+	}
+
+	if p == 0 {
+		return sortedTimes[0]
+	}
+
+	if p == 100 {
+		return sortedTimes[len(sortedTimes)-1]
+	}
+
+	k := (float64(p) / 100) * float64(len(sortedTimes)+1)
+	floor, ceil := int(k), int(k)+1
+
+	if ceil > len(sortedTimes) {
+		return sortedTimes[floor-1]
+	}
+
+	floorValue := sortedTimes[floor-1]
+	linearExtrapolation := (k - float64(floor)) * (sortedTimes[ceil-1] - sortedTimes[floor-1])
+
+	return floorValue + linearExtrapolation
 }
 
 type benchmark map[string]*results
@@ -195,15 +239,16 @@ func run(config *config, pg *pressureGauge, benchmark benchmark) error {
 
 		pg.wg.Wait()
 		benchmark[server].avg = benchmark[server].sum / float64(config.num)
+		calculateStatistics(benchmark[server])
 	}
 
 	fmt.Printf("\nBenchmark for %d reqs completed in %s\n", config.num, time.Since(benchmarkStartTime))
 	fmt.Printf("Done.\n\n")
 
 	fmt.Println("Results:")
-	fmt.Printf("        avg          min          max\n")
-	fmt.Printf("  Edge: %.3fms    %.3fms    %.3fms\n", benchmark["edge"].avg, benchmark["edge"].min, benchmark["edge"].max)
-	fmt.Printf("   VPS: %.3fms    %.3fms    %.3fms\n\n", benchmark["vps"].avg, benchmark["vps"].min, benchmark["vps"].max)
+	fmt.Printf("        avg          p50          p25          p75          p90          min          max\n")
+	fmt.Printf("  Edge: %.3fms    %.3fms    %.3fms    %.3fms    %.3fms    %.3fms    %.3fms\n", benchmark["edge"].avg, benchmark["edge"].p50, benchmark["edge"].p25, benchmark["edge"].p75, benchmark["edge"].p90, benchmark["edge"].min, benchmark["edge"].max)
+	fmt.Printf("   VPS: %.3fms    %.3fms    %.3fms    %.3fms    %.3fms    %.3fms    %.3fms\n\n", benchmark["vps"].avg, benchmark["vps"].p50, benchmark["vps"].p25, benchmark["vps"].p75, benchmark["vps"].p90, benchmark["vps"].min, benchmark["vps"].max)
 
 	return nil
 }
