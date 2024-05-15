@@ -26,19 +26,18 @@ type config struct {
 }
 
 type results struct {
-	mu    sync.Mutex
-	name  string
-	times []float64
-	sum   float64
-	p25   float64
-	p50   float64
-	p75   float64
-	p90   float64
-	p95   float64
-	p99   float64
-	max   float64
-	min   float64
-	avg   float64
+	mu       sync.Mutex
+	name     string
+	times    []float64
+	sum      float64
+	complete int
+	p25      float64
+	p50      float64
+	p75      float64
+	p90      float64
+	max      float64
+	min      float64
+	avg      float64
 }
 
 func calculateStatistics(results *results) {
@@ -202,6 +201,7 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 	benchmark[server].times[i] = elapsed
 
 	benchmark[server].mu.Lock()
+	benchmark[server].complete++
 	benchmark[server].sum += elapsed
 
 	if elapsed > benchmark[server].max {
@@ -211,6 +211,22 @@ func send(i int, url string, server string, benchmark benchmark, pg *pressureGau
 	if benchmark[server].min == 0 || elapsed < benchmark[server].min {
 		benchmark[server].min = elapsed
 	}
+
+	progress := math.Round((float64(benchmark[server].complete) / float64(len(benchmark[server].times))) * 100)
+
+	str := make([]string, 10)
+	for i := 0; i < 10; i++ {
+		if float64(i*10) < progress {
+			str[i] = "="
+		} else {
+			str[i] = " "
+		}
+	}
+
+	if int(progress)%10 == 0 {
+		fmt.Printf("\r[%s] %d%%\n", strings.Join(str, ""), int(progress))
+	}
+
 	benchmark[server].mu.Unlock()
 
 	// Release the token back to the pressure gauge.
