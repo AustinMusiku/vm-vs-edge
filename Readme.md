@@ -5,9 +5,22 @@ I had initially planned to use cloudflare's workers platform for the edge server
 but it was a bit challenging to make it work with go. Hopefully, I will succeed in the future and prepare a sequel to this experiment.
 
 ## Setup
+### HTTP Services
+The two services expose two endpoints each: `/` and `/characters`. The `/` endpoint handler iterates over a list of names, `characters`, and appends each name to a html ordered list template string. The final html list element is sent over in a html page. The `/characters` endpoint just spits out the list of characters in JSON format.
+
+### CLI Application
+The CLI app automates the process of sending HTTP requests to the two services and recording the response time metrics. The response time metrics are then used to compute the relevant numerical summaries.
+
+The app accepts the following arguments:
+1. `-n`: The number of requests to send to each service.
+2. `edge-url`: The URL of the edge server.
+3. `vps-url`: The URL of the VPS server.
+
+
+### Folder structure
 - VPS Server Code and Configuration: The code and configuration for the VPS-based HTTP service are located in the `./vm` directory.
 - Edge Server Code and Configuration: The code and configuration for the serverless edge platform-based HTTP service are located in the `./edge` directory.
-- Experiment Entry Point: The entry point for the experiment is a CLI application, located at `./benchmark.go`. This CLI application accepts one flag, `n`, and two arguments, `vps-url` and `edge-url`. The application sends `n` HTTP requests to each of the services and records the `mean`, `minimum`, and `maximum` response time.
+- Experiment Entry Point: The entry point for the experiment is a CLI application, located at `./benchmark.go`. This CLI application accepts one flag, `n`, and two arguments, `vps-url` and `edge-url`. The application sends `n` HTTP requests to each of the services and records the `mean`, `p25`, `p50`, `p75`, `p90`, `minimum`, and `maximum` response time for each service.
 
 ## Usage
 
